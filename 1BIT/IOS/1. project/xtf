@@ -1,0 +1,214 @@
+#!/bin/bash
+
+
+# NAME:         IOS PROJECT 1 - XTF
+# DATE:         16-03-2024
+# AUTHOR:       Fignar Matus
+# XLOGIN:       xfignam00
+
+
+export POSIXLY_CORRECT=yes
+export LC_ALL=C  
+
+print_help(){
+echo "USAGE: xtf [-h|--help]"
+echo "USAGE: xtf [FILTER] [INSTRUCTION] USER LOG [LOG2 [...]"
+echo ""
+echo "-h --help"
+echo "  Shows help for all options, for both the filter and the instruction sections"
+echo ""
+echo "FILTER"  
+echo "  -a DATETIME"
+echo "  filters records after the specified date and time "
+echo "  --required format: YYYY-MM-DD HH:MM:SS"
+echo ""
+echo "  -b DATETIME"
+echo "  filters records before the specified date and time "
+echo "  --required format: YYYY-MM-DD HH:MM:SS"
+echo ""
+echo "  -c CURRENCY"
+echo "  filters records which contain the (only one) selected currency "
+echo "  --selected currency must contain only 3 letter string"
+echo ""
+echo "INSTRUCTION" 
+echo "  list"
+echo "  (Default option) prints the complete record of the user's transactions"
+echo ""
+echo "  list-currency"
+echo "  Prints the list of the user's occurring currencies, alphabetically sorted"
+echo ""
+echo "  status"
+echo "  Prints the actual state of the user's account, sorted by individual currencies"
+echo ""
+echo "  profit"
+echo "  Prints the state of the user's account, sorted by individual currencies, with fictional profit"
+echo ""
+echo "USER (Mandatory)"
+echo "  Program searches for records of this user"
+echo ""
+echo "LOG  (Mandatory)"
+echo "  Must be existing file with trading records"
+echo "  If you want to process multiples, file leave space between them"
+}
+
+
+
+#prints help and exits with 0
+case "$1" in 
+    -h|--help)
+        print_help
+        exit 0
+        ;;
+esac
+
+#process arguments which represents filtering options
+before=""
+after=""
+currency=""
+while getopts "a:b:c:" opt; do
+    case ${opt} in
+        a)
+            #checks if selected filter was already given
+            if [ -n "$after" ]; then
+                echo "Wrong input format, run program with -h or --help">&2
+                exit 1
+            fi
+            #checks if date is in correct format 
+            if [[ "$OPTARG" =~ ^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])[[:space:]][0-2][0-9]:[0-6][0-9]:[0-6][0-9]$ ]]; then
+                after=$OPTARG
+            else
+                echo "Wrong date format">&2
+                exit 1
+            fi
+            ;;
+        b)
+            #checks if selected filter was already given
+            if [ -n "$before" ]; then
+                echo "Wrong input format, run program with -h or --help">&2
+                exit 1
+            fi
+            #checks if date is in correct format 
+            if [[ "$OPTARG" =~ ^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])[[:space:]][0-2][0-9]:[0-6][0-9]:[0-6][0-9]$ ]]; then
+                before=$OPTARG
+            else
+                echo "Wrong date format">&2
+                exit 1
+            fi
+            ;;
+        c)
+            #checks if selected filter was already given
+            if [ -n "$currency" ]; then
+                echo "Wrong input format, run program with -h or --help">&2
+                exit 1
+            fi
+            currency=$OPTARG
+            #checks if currency is in correct format
+            if ! [[ $currency =~ ^[a-zA-Z]{3}$ ]]; then
+                echo "wrong currency format, run program with -h or --help">&2
+                exit 1
+            fi
+
+            ;;
+        \?)
+            echo "Wrong filter format, run program with -h or --help">&2
+            exit 1
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+done
+
+#shifts processed arguments
+shift $((OPTIND -1))
+
+#cycles through the reamining arguments and searches for the instructions arguments
+command=""
+for arg in "$@"; do
+    case $arg in
+        list|list-currency|status|profit)
+            #in case of duplicit instructions end the script with error message
+            if [ -n "$command" ]; then
+                echo "Wrong amount of instructions, run program with -h or --help">&2
+                exit 1
+            fi
+            command="$arg"
+            shift
+            ;;
+        *)
+            ;;
+    esac
+done
+
+#if instruction was not given set default instruction as list
+if [ -z "$command" ]; then
+    command="list"
+fi
+
+if [ $# -lt 2 ]; then
+    echo "File or user input missing, run program with -h or --help">&2
+    exit 1
+fi
+
+#process file and user input
+file=""
+USER=""
+for arg in "$@"; do
+    
+    if [[ -f $arg && $arg == *.* && $arg != *.gz ]]; then
+        file+="
+$(cat "$arg")"
+    elif [[ -f "$arg" && $arg == *.gz ]]; then
+        unzipped_content="
+$(gzip -dc "$arg")"
+        file+="$unzipped_content"
+    else
+        #checks if user input was already given if yes ends the script with erorr message
+        if [ -n "$USER" ]; then
+            echo "Too many users inputs or wrong argument, run program with -h or --help">&2
+            exit 1
+        fi
+        USER="$arg"
+        
+    fi
+
+done
+
+#if user input was not given ends the script with erorr message
+if [ -z "$USER" ]; then
+    echo "Mising user input,, run program with -h or --help">&2
+    exit 1
+fi
+
+#if file input was not given ends the script with erorr message
+if [ -z "$file" ]; then
+    echo "Mising file input, run program with -h or --help">&2
+    exit 1
+fi
+
+#checks if the variable for profit calculation was set if not, then it gives default value to the variable 
+if [ -z "$XTF_PROFIT" ]; then
+    XTF_PROFIT=20
+fi
+
+#checks if format of file/s content is correct
+if echo "$file" | grep  -E -v '^[^;]+;[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])[[:space:]][0-2][0-9]:[0-6][0-9]:[0-6][0-9];[a-zA-Z]{3};-?[0-9]+\.[0-9]{4}$' | grep -v '^$' > /dev/null 2>&1; then
+    echo "wrong file format">&2
+    exit 1
+fi
+
+
+case "$command" in
+    list)
+        echo "$file" | awk -F ';' -v user="$USER" -v start_date="$after" -v end_date="$before" -v currency="$currency" '((!currency || $3 == currency) && (!start_date ||$2 > start_date) && (!end_date || $2 < end_date) && $1 == user ) {print }' 
+    ;;
+    list-currency)
+        echo "$file" | awk -F ';' -v user="$USER" -v start_date="$after" -v end_date="$before" -v currency="$currency" '((!currency || $3 == currency) && (!start_date ||$2 > start_date) && (!end_date || $2 < end_date) && $1 == user && !seen[$3]++ ) {print $3}' | sort
+    ;;
+    status)
+        echo "$file" | awk -F ';' -v user="$USER" -v start_date="$after" -v end_date="$before"  -v currency="$currency" '((!currency || $3 == currency) && (!start_date ||$2 > start_date) && (!end_date || $2 < end_date) && $1 == user) {sum[$3]+=$4} END{for(currency in sum)  printf "%s : %.4f\n", currency, sum[currency]}' | sort
+        ;;
+    profit)
+        echo "$file" | awk -F ';' -v profit="$XTF_PROFIT" -v user="$USER" -v start_date="$after" -v end_date="$before" -v currency="$currency" '((!currency || $3 == currency) && (!start_date ||$2 > start_date) && (!end_date || $2 < end_date) && $1 == user) {sum[$3]+=$4} END{for(currency in sum) if(sum[currency] > 0) {sum[currency] = sum[currency] + (profit * sum[currency] / 100)} else{ printf "%s : %.4f\n", currency, sum[currency]} printf "%s : %.4f\n", currency, sum[currency] }' | sort
+    ;;
+esac
